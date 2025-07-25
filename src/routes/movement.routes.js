@@ -13,7 +13,7 @@ function extractDestination(errorMessage) {
 }
 
 // 处理移动命令
-router.post('/move', async (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const { userId, command } = req.body;
     

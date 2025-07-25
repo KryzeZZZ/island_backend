@@ -1,11 +1,21 @@
 const express = require('express');
 const router = express.Router();
 const nodeService = require('../services/node.service');
+const vectorizeService = require('../services/vectorize.service');
 
 // Scene 路由
 router.post('/scenes', async (req, res) => {
   try {
-    const scene = await nodeService.createScene(req.body);
+    const { polarPosition, description } = req.body;
+    
+    // 对描述文本进行向量化
+    const vector = await vectorizeService.vectorizeDescription(description);
+    
+    const scene = await nodeService.createScene({ 
+      polarPosition, 
+      description, 
+      vector 
+    });
     res.status(201).json(scene);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -73,7 +83,16 @@ router.get('/objects/:objectId/relationships', async (req, res) => {
 // User 路由
 router.post('/users', async (req, res) => {
   try {
-    const user = await nodeService.createUser(req.body);
+    const { polarPosition, introduction } = req.body;
+    
+    // 对用户介绍进行向量化
+    const vector = await vectorizeService.vectorizeDescription(introduction);
+    
+    const user = await nodeService.createUser({ 
+      polarPosition, 
+      introduction, 
+      vector 
+    });
     res.status(201).json(user);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -141,7 +160,17 @@ router.put('/users/:userId/position-with-scene', async (req, res) => {
   try {
     const { userId } = req.params;
     const { polarPosition } = req.body;
-    const result = await nodeService.updateUserPositionAndLinkScene(userId, polarPosition);
+    
+    // 获取用户当前信息
+    const user = await nodeService.getUser(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // 重新对用户介绍进行向量化（或者使用现有的向量）
+    const vector = await vectorizeService.vectorizeDescription(user.introduction);
+    
+    const result = await nodeService.updateUserPositionAndLinkScene(userId, polarPosition, vector);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -157,6 +186,34 @@ router.get('/users/:userId/current-scene', async (req, res) => {
       return res.status(404).json({ message: 'User is not located at any scene' });
     }
     res.json(scene);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 查找相似场景
+router.post('/scenes/similar', async (req, res) => {
+  try {
+    const { vector, limit } = req.body;
+    if (!vector || vector.length !== 768) {
+      return res.status(400).json({ error: 'Vector must be a 768-dimensional array' });
+    }
+    const scenes = await nodeService.findSimilarScenes(vector, limit);
+    res.json(scenes);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 查找相似用户
+router.post('/users/similar', async (req, res) => {
+  try {
+    const { vector, limit } = req.body;
+    if (!vector || vector.length !== 768) {
+      return res.status(400).json({ error: 'Vector must be a 768-dimensional array' });
+    }
+    const users = await nodeService.findSimilarUsers(vector, limit);
+    res.json(users);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

@@ -55,12 +55,14 @@ class NodeService {
           radius: $radius,
           angle: $angle,
           description: $description,
+          vector: $vector,
           createdAt: datetime()
         }) RETURN s`,
         { 
           radius: properties.polarPosition.radius,
           angle: properties.polarPosition.angle,
-          description: properties.description
+          description: properties.description,
+          vector: properties.vector
         }
       );
       return this.formatNodeProperties(result.records[0].get('s').properties);
@@ -125,12 +127,14 @@ class NodeService {
           radius: $radius,
           angle: $angle,
           introduction: $introduction,
+          vector: $vector,
           createdAt: datetime()
         }) RETURN u`,
         { 
           radius: properties.polarPosition.radius,
           angle: properties.polarPosition.angle,
-          introduction: properties.introduction
+          introduction: properties.introduction,
+          vector: properties.vector
         }
       );
       return this.formatNodeProperties(result.records[0].get('u').properties);
@@ -266,60 +270,59 @@ class NodeService {
     }
   }
 
-  // 更新用户位置并连接到最近的场景
-  async updateUserPositionAndLinkScene(userId, polarPosition) {
+  // 更新用户位置并连接到最近的场景（使用向量相似度）
+  async updateUserPositionAndLinkScene(userId, polarPosition, vector) {
     const session = this.driver.session();
     try {
-      // 首先更新用户位置
+      // 首先更新用户位置和向量
       await session.run(
         `MATCH (u:User {id: $userId})
-         SET u.radius = $radius, u.angle = $angle`,
+         SET u.radius = $radius, 
+             u.angle = $angle,
+             u.vector = $vector`,
         { 
           userId,
           radius: polarPosition.radius,
-          angle: polarPosition.angle
+          angle: polarPosition.angle,
+          vector
         }
       );
-      // 先尝试找到完全匹配的场景
-      let result = await session.run(
+
+      // 使用向量相似度和位置信息综合查找最匹配的场景
+      // 这里使用点积（dot product）计算向量相似度，并结合位置距离
+      const result = await session.run(
         `MATCH (u:User {id: $userId}), (s:Scene)
-         WHERE u.radius = s.radius AND u.angle = s.angle
-         WITH u, s, 0 as distance
+         WITH u, s,
+         reduce(dot = 0.0, i IN range(0, size(u.vector)-1) | 
+           dot + u.vector[i] * s.vector[i]
+         ) as vectorSimilarity,
+         sqrt(
+           (u.radius * u.radius) + 
+           (s.radius * s.radius) - 
+           2 * u.radius * s.radius * cos(abs(u.angle - s.angle))
+         ) as distance
+         WITH u, s, 
+         // 综合评分：向量相似度越高越好，距离越近越好
+         vectorSimilarity / (distance + 0.1) as score
+         ORDER BY score DESC
          LIMIT 1
          OPTIONAL MATCH (u)-[r:LOCATED_AT]->(:Scene)
          DELETE r
-         WITH u, s, distance
-         CREATE (u)-[r:LOCATED_AT]->(s)
-         RETURN u, s, distance`,
+         WITH u, s, score
+         CREATE (u)-[r:LOCATED_AT {
+           score: score,
+           vector: u.vector,
+           createdAt: datetime()
+         }]->(s)
+         RETURN u, s, r`,
         { userId }
       );
-
-      // 如果没有完全匹配的场景，则寻找最近的场景
-      if (result.records.length === 0) {
-        result = await session.run(
-          `MATCH (u:User {id: $userId}), (s:Scene)
-           WITH u, s,
-           sqrt(
-             (u.radius * u.radius) + 
-             (s.radius * s.radius) - 
-             2 * u.radius * s.radius * cos(abs(u.angle - s.angle))
-           ) as distance
-           ORDER BY distance ASC
-           LIMIT 1
-           OPTIONAL MATCH (u)-[r:LOCATED_AT]->(:Scene)
-           DELETE r
-           WITH u, s, distance
-           CREATE (u)-[r:LOCATED_AT]->(s)
-           RETURN u, s, distance`,
-          { userId }
-        );
-      }
 
       const record = result.records[0];
       return {
         user: this.formatNodeProperties(record.get('u').properties),
         scene: this.formatNodeProperties(record.get('s').properties),
-        distance: record.get('distance').toNumber()
+        relationship: record.get('r').properties
       };
     } finally {
       await session.close();
@@ -338,6 +341,56 @@ class NodeService {
       
       if (result.records.length === 0) return null;
       return this.formatNodeProperties(result.records[0].get('s').properties);
+    } finally {
+      await session.close();
+    }
+  }
+
+  // 根据向量相似度查找场景
+  async findSimilarScenes(vector, limit = 5) {
+    const session = this.driver.session();
+    try {
+      const result = await session.run(
+        `MATCH (s:Scene)
+         WITH s,
+         reduce(dot = 0.0, i IN range(0, size($vector)-1) | 
+           dot + $vector[i] * s.vector[i]
+         ) as similarity
+         ORDER BY similarity DESC
+         LIMIT $limit
+         RETURN s, similarity`,
+        { vector, limit: neo4j.int(limit) }
+      );
+
+      return result.records.map(record => ({
+        scene: this.formatNodeProperties(record.get('s').properties),
+        similarity: record.get('similarity').toNumber()
+      }));
+    } finally {
+      await session.close();
+    }
+  }
+
+  // 根据向量相似度查找用户
+  async findSimilarUsers(vector, limit = 5) {
+    const session = this.driver.session();
+    try {
+      const result = await session.run(
+        `MATCH (u:User)
+         WITH u,
+         reduce(dot = 0.0, i IN range(0, size($vector)-1) | 
+           dot + $vector[i] * u.vector[i]
+         ) as similarity
+         ORDER BY similarity DESC
+         LIMIT $limit
+         RETURN u, similarity`,
+        { vector, limit: neo4j.int(limit) }
+      );
+
+      return result.records.map(record => ({
+        user: this.formatNodeProperties(record.get('u').properties),
+        similarity: record.get('similarity').toNumber()
+      }));
     } finally {
       await session.close();
     }

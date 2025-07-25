@@ -1,4 +1,6 @@
 const neo4j = require('neo4j-driver');
+const objectService = require('./object.service');
+const vectorizeService = require('./vectorize.service');
 
 class NodeService {
   constructor() {
@@ -49,7 +51,8 @@ class NodeService {
   async createScene(properties) {
     const session = this.driver.session();
     try {
-      const result = await session.run(
+      // 1. 创建场景节点
+      const sceneResult = await session.run(
         `CREATE (s:Scene {
           id: randomUUID(),
           radius: $radius,
@@ -65,7 +68,68 @@ class NodeService {
           vector: properties.vector
         }
       );
-      return this.formatNodeProperties(result.records[0].get('s').properties);
+      
+      const scene = this.formatNodeProperties(sceneResult.records[0].get('s').properties);
+
+      // 2. 扫描描述中的物体
+      const scannedObjects = await objectService.scanObjectsFromDescription(properties.description);
+      
+      // 3. 为每个扫描到的物体创建节点和关系
+      for (const obj of scannedObjects) {
+        // 向量化物体描述
+        const objVector = await vectorizeService.vectorizeDescription(obj.object);
+        
+        // 创建物体节点并建立关系
+        await session.run(
+          `MATCH (s:Scene {id: $sceneId})
+           CREATE (o:Object {
+             id: randomUUID(),
+             name: $name,
+             description: $description,
+             refinable: $refinable,
+             interactable: $interactable,
+             vector: $vector,
+             createdAt: datetime()
+           })
+           CREATE (s)-[r:CONTAINS]->(o)
+           ${obj.is_entry ? 'CREATE (o)-[e:ENTRY_TO]->(s)' : ''}
+           RETURN o`,
+          {
+            sceneId: scene.id,
+            name: obj.object,
+            description: obj.object,  // 使用对象名称作为基础描述
+            refinable: obj.refinable,
+            interactable: obj.interactable,
+            vector: objVector
+          }
+        );
+      }
+
+      // 4. 返回完整的场景信息
+      const result = await session.run(
+        `MATCH (s:Scene {id: $sceneId})
+         OPTIONAL MATCH (s)-[:CONTAINS]->(o:Object)
+         OPTIONAL MATCH (o)-[e:ENTRY_TO]->(s)
+         WITH s, o, e
+         RETURN s, 
+                collect({
+                  object: o,
+                  is_entry: e IS NOT NULL
+                }) as objects`,
+        { sceneId: scene.id }
+      );
+
+      const finalScene = this.formatNodeProperties(result.records[0].get('s').properties);
+      const objects = result.records[0].get('objects').map(item => ({
+        ...this.formatNodeProperties(item.object.properties),
+        is_entry: item.is_entry
+      }));
+
+      return {
+        scene: finalScene,
+        objects: objects
+      };
+
     } finally {
       await session.close();
     }
@@ -391,6 +455,69 @@ class NodeService {
         user: this.formatNodeProperties(record.get('u').properties),
         similarity: record.get('similarity').toNumber()
       }));
+    } finally {
+      await session.close();
+    }
+  }
+
+  // 更新用户所在场景
+  async updateUserLocation(userId, sceneId) {
+    const session = this.driver.session();
+    try {
+      // 删除旧的 LOCATED_AT 关系并创建新的
+      const result = await session.run(
+        `MATCH (u:User {id: $userId})
+         OPTIONAL MATCH (u)-[old:LOCATED_AT]->(:Scene)
+         DELETE old
+         WITH u
+         MATCH (s:Scene {id: $sceneId})
+         CREATE (u)-[r:LOCATED_AT {
+           createdAt: datetime()
+         }]->(s)
+         RETURN u, s`,
+        { userId, sceneId }
+      );
+
+      if (result.records.length === 0) {
+        throw new Error('User or Scene not found');
+      }
+
+      const record = result.records[0];
+      return {
+        user: this.formatNodeProperties(record.get('u').properties),
+        scene: this.formatNodeProperties(record.get('s').properties)
+      };
+    } finally {
+      await session.close();
+    }
+  }
+
+  // 根据场景描述查找或创建场景
+  async findOrCreateScene(description) {
+    const session = this.driver.session();
+    try {
+      // 先尝试找到完全匹配的场景
+      let result = await session.run(
+        `MATCH (s:Scene {description: $description})
+         RETURN s`,
+        { description }
+      );
+
+      if (result.records.length > 0) {
+        return this.formatNodeProperties(result.records[0].get('s').properties);
+      }
+
+      // 如果没有找到，创建新场景
+      result = await session.run(
+        `CREATE (s:Scene {
+          id: randomUUID(),
+          description: $description,
+          createdAt: datetime()
+        }) RETURN s`,
+        { description }
+      );
+
+      return this.formatNodeProperties(result.records[0].get('s').properties);
     } finally {
       await session.close();
     }

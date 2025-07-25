@@ -6,6 +6,7 @@ require('dotenv').config();
 
 const nodeRoutes = require('./routes/node.routes');
 const motiveRoutes = require('./routes/motive.routes');
+const movementRoutes = require('./routes/movement.routes');
 
 const app = express();
 
@@ -41,6 +42,7 @@ testConnection();
 // Routes
 app.use('/api', nodeRoutes);
 app.use('/api/motives', motiveRoutes);
+app.use('/api/movement', movementRoutes);
 
 // Basic route
 app.get('/', (req, res) => {

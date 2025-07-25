@@ -458,3 +458,167 @@ PUT /:nodeType/:nodeId/position
 - 400: 请求参数错误
 - 404: 资源未找到
 - 500: 服务器内部错误 
+
+## Account API
+
+### 注册账户
+```http
+POST /api/accounts/register
+
+请求体：
+{
+  "email": "user@example.com",     // 邮箱地址（必须唯一）
+  "password": "password123",       // 密码（至少6个字符）
+  "username": "testuser"          // 用户名（将作为第一个角色的介绍）
+}
+
+响应：
+{
+  "account": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "email": "user@example.com",
+    "username": "testuser",
+    "createdAt": "2024-01-01T00:00:00.000Z"
+  },
+  "user": {
+    "id": "663e8400-e29b-41d4-a716-446655440111",
+    "introduction": "testuser",
+    "createdAt": "2024-01-01T00:00:00.000Z"
+  }
+}
+```
+
+### 登录
+```http
+POST /api/accounts/login
+
+请求体：
+{
+  "email": "user@example.com",
+  "password": "password123"
+}
+
+响应：
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "email": "user@example.com",
+  "username": "testuser",
+  "createdAt": "2024-01-01T00:00:00.000Z"
+}
+```
+
+### 添加新用户（角色）到账户
+```http
+POST /api/accounts/:accountId/users
+
+请求体：
+{
+  "introduction": "新角色的介绍"  // 角色介绍文本
+}
+
+响应：
+{
+  "id": "663e8400-e29b-41d4-a716-446655440111",
+  "introduction": "新角色的介绍",
+  "createdAt": "2024-01-01T00:00:00.000Z"
+}
+```
+
+### 获取账户下的所有用户
+```http
+GET /api/accounts/:accountId/users
+
+响应：
+[
+  {
+    "id": "663e8400-e29b-41d4-a716-446655440111",
+    "introduction": "testuser",
+    "createdAt": "2024-01-01T00:00:00.000Z"
+  },
+  {
+    "id": "773e8400-e29b-41d4-a716-446655440222",
+    "introduction": "新角色的介绍",
+    "createdAt": "2024-01-01T00:00:00.000Z"
+  }
+]
+```
+
+### 错误响应
+
+1. 注册错误：
+```json
+{
+  "error": "Email already exists"  // 邮箱已存在
+}
+```
+```json
+{
+  "error": "Invalid email format"  // 邮箱格式错误
+}
+```
+```json
+{
+  "error": "Password must be at least 6 characters long"  // 密码太短
+}
+```
+
+2. 登录错误：
+```json
+{
+  "error": "Invalid email or password"  // 邮箱或密码错误
+}
+```
+
+3. 添加用户错误：
+```json
+{
+  "error": "Account not found"  // 账户不存在
+}
+```
+
+### 数据模型
+
+1. Account 节点：
+```cypher
+(a:Account {
+  id: string,          // UUID
+  email: string,       // 唯一邮箱
+  password: string,    // 加密后的密码
+  username: string,    // 用户名
+  createdAt: datetime  // 创建时间
+})
+```
+
+2. User 节点：
+```cypher
+(u:User {
+  id: string,          // UUID
+  introduction: string, // 角色介绍
+  createdAt: datetime  // 创建时间
+})
+```
+
+3. 关系：
+```cypher
+(User)-[:BELONGS_TO]->(Account)  // 用户属于账户
+```
+
+### 注意事项
+
+1. 密码安全：
+   - 密码使用 bcrypt 加密存储
+   - 密码从不在响应中返回
+   - 密码长度至少 6 个字符
+
+2. 邮箱验证：
+   - 邮箱必须是唯一的
+   - 必须符合标准邮箱格式
+
+3. 多用户支持：
+   - 一个账户可以创建多个用户（角色）
+   - 每个用户都有独立的介绍
+   - 所有用户通过 BELONGS_TO 关系关联到账户
+
+4. 创建账户时：
+   - 自动创建第一个用户
+   - 使用注册时的用户名作为第一个用户的介绍 

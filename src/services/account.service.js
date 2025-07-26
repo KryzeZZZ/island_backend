@@ -1,39 +1,37 @@
-const neo4j = require('neo4j-driver');
-const bcrypt = require('bcrypt');
+const neo4j = require("neo4j-driver");
+const bcrypt = require("bcrypt");
 
 class AccountService {
   constructor() {
     this.driver = neo4j.driver(
-      process.env.NEO4J_URI || 'bolt://localhost:7687',
+      process.env.NEO4J_URI || "bolt://localhost:7687",
       neo4j.auth.basic(
-        process.env.NEO4J_USER || 'neo4j',
-        process.env.NEO4J_PASSWORD || '20071028'
+        process.env.NEO4J_USER || "neo4j",
+        process.env.NEO4J_PASSWORD || "20071028"
       )
     );
   }
 
-  async createAccount(email, password, username) {
+  async createAccount(clerkId, email, username) {
     const session = this.driver.session();
     try {
       // 检查邮箱是否已存在
       const existingAccount = await session.run(
-        'MATCH (a:Account {email: $email}) RETURN a',
-        { email }
+        "MATCH (a:Account {clerkId: $clerkId}) RETURN a",
+        { clerkId }
       );
 
       if (existingAccount.records.length > 0) {
-        throw new Error('Email already exists');
+        return this.formatNodeProperties(
+          existingAccount.records[0].get("a").properties
+        );
       }
 
-      // 密码加密
-      const hashedPassword = await bcrypt.hash(password, 10);
-
-      // 创建账户和用户节点
       const result = await session.run(
         `CREATE (a:Account {
           id: randomUUID(),
+          clerkId: $clerkId,
           email: $email,
-          password: $password,
           username: $username,
           createdAt: datetime()
         })
@@ -42,25 +40,22 @@ class AccountService {
           introduction: $username,
           createdAt: datetime()
         })
-        CREATE (u)-[r:BELONGS_TO]->(a)
+        CREATE (u)-[:BELONGS_TO]->(a)
         RETURN a, u`,
         {
+          clerkId,
           email,
-          password: hashedPassword,
-          username
+          username,
         }
       );
 
       const record = result.records[0];
-      const account = this.formatNodeProperties(record.get('a').properties);
-      const user = this.formatNodeProperties(record.get('u').properties);
-
-      // 不返回密码
-      delete account.password;
+      const account = this.formatNodeProperties(record.get("a").properties);
+      const user = this.formatNodeProperties(record.get("u").properties);
 
       return {
         account,
-        user
+        user,
       };
     } finally {
       await session.close();
@@ -72,12 +67,12 @@ class AccountService {
     try {
       // 检查账户是否存在
       const accountExists = await session.run(
-        'MATCH (a:Account {id: $accountId}) RETURN a',
+        "MATCH (a:Account {id: $accountId}) RETURN a",
         { accountId }
       );
 
       if (accountExists.records.length === 0) {
-        throw new Error('Account not found');
+        throw new Error("Account not found");
       }
 
       // 创建新用户并关联到账户
@@ -92,11 +87,11 @@ class AccountService {
          RETURN u`,
         {
           accountId,
-          introduction
+          introduction,
         }
       );
 
-      return this.formatNodeProperties(result.records[0].get('u').properties);
+      return this.formatNodeProperties(result.records[0].get("u").properties);
     } finally {
       await session.close();
     }
@@ -111,8 +106,8 @@ class AccountService {
         { accountId }
       );
 
-      return result.records.map(record => 
-        this.formatNodeProperties(record.get('u').properties)
+      return result.records.map((record) =>
+        this.formatNodeProperties(record.get("u").properties)
       );
     } finally {
       await session.close();
@@ -123,7 +118,7 @@ class AccountService {
     const session = this.driver.session();
     try {
       const result = await session.run(
-        'MATCH (a:Account {email: $email}) RETURN a',
+        "MATCH (a:Account {email: $email}) RETURN a",
         { email }
       );
 
@@ -131,7 +126,9 @@ class AccountService {
         return null;
       }
 
-      const account = this.formatNodeProperties(result.records[0].get('a').properties);
+      const account = this.formatNodeProperties(
+        result.records[0].get("a").properties
+      );
       const isValid = await bcrypt.compare(password, account.password);
 
       if (!isValid) {
@@ -149,7 +146,7 @@ class AccountService {
   formatNodeProperties(properties) {
     if (!properties) return null;
     const formatted = { ...properties };
-    
+
     if (formatted.createdAt) {
       formatted.createdAt = new Date(
         formatted.createdAt.year.low,
@@ -166,4 +163,4 @@ class AccountService {
   }
 }
 
-module.exports = new AccountService(); 
+module.exports = new AccountService();

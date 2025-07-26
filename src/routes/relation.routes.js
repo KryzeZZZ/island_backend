@@ -36,15 +36,22 @@ router.post('/interaction', async (req, res) => {
       });
     }
 
-    // 确保 target_relation 包含 subject, predicate, object 属性，但允许它们为空字符串
-    action.target_relation = {
+    // 提取关系
+    const relations = await relationService.extractRelations(text);
+
+    // 准备 roll_dice 请求的 target_relation
+    const targetRelation = relations.length > 0 ? {
+      subject: relations[0].subject || '',
+      predicate: relations[0].predicate || '',
+      object: relations[0].object || ''
+    } : {
       subject: action.target_relation.subject || '',
       predicate: action.target_relation.predicate || '',
       object: action.target_relation.object || ''
     };
 
-    // 提取关系
-    const relations = await relationService.extractRelations(text);
+    // 更新 action 的 target_relation
+    action.target_relation = targetRelation;
 
     // 掷骰子判断动作结果
     const rollResult = await relationService.rollDiceForAction(userId, action);
@@ -60,7 +67,8 @@ router.post('/interaction', async (req, res) => {
     );
 
     res.json({
-      relations,
+      relations,  // 返回提取的所有关系
+      targetRelation,  // 返回用于 roll_dice 的目标关系
       rollResult,
       trace
     });

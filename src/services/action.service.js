@@ -199,10 +199,15 @@ class ActionService {
       // 获取当前场景
       const currentScene = await this.getCurrentScene(userId);
 
+      // 处理 action 对象
+      const actionText = typeof action === 'object' 
+        ? (action.text || JSON.stringify(action)) 
+        : String(action);
+
       // 构建请求数据
       const requestData = {
         persona,
-        action,
+        action: actionText,
         related_objects
       };
 
@@ -213,7 +218,7 @@ class ActionService {
 
       // 记录行动结果
       if (response.data.outcome) {
-        await this.recordActionTrace(currentScene.id, response.data.outcome, action);
+        await this.recordActionTrace(currentScene.id, response.data.outcome, actionText);
       }
 
       return response.data;

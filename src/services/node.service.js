@@ -414,22 +414,77 @@ class NodeService {
   async findSimilarScenes(vector, limit = 5) {
     const session = this.driver.session();
     try {
+      // 打印输入向量的基本信息
+      console.log('Input Vector:', {
+        length: vector.length,
+        firstFewValues: vector.slice(0, 5),
+        vectorType: typeof vector,
+        isArray: Array.isArray(vector)
+      });
+
       const result = await session.run(
         `MATCH (s:Scene)
          WITH s,
-         reduce(dot = 0.0, i IN range(0, size($vector)-1) | 
-           dot + $vector[i] * s.vector[i]
-         ) as similarity
-         ORDER BY similarity DESC
+         // 检查向量是否存在和有效
+         CASE 
+           WHEN s.vector IS NOT NULL AND size(s.vector) > 0 THEN true 
+           ELSE false 
+         END as hasValidVector,
+         // 计算余弦相似度
+         CASE 
+           WHEN s.vector IS NOT NULL AND size(s.vector) > 0 THEN 
+             reduce(dot = 0.0, i IN range(0, size($vector)-1) | 
+               dot + $vector[i] * s.vector[i]
+             ) / (
+               sqrt(reduce(lenA = 0.0, i IN range(0, size($vector)-1) | 
+                 lenA + $vector[i] * $vector[i]
+               )) * 
+               sqrt(reduce(lenB = 0.0, i IN range(0, size(s.vector)-1) | 
+                 lenB + s.vector[i] * s.vector[i]
+               ))
+             )
+           ELSE 0.0 
+         END as cosineSimilarity
+         WHERE hasValidVector
+         ORDER BY cosineSimilarity DESC
          LIMIT $limit
-         RETURN s, similarity`,
+         RETURN s, cosineSimilarity, hasValidVector`,
         { vector, limit: neo4j.int(limit) }
       );
 
-      return result.records.map(record => ({
-        scene: this.formatNodeProperties(record.get('s').properties),
-        similarity: record.get('similarity').toNumber()
-      }));
+      // 打印查询结果的详细信息
+      console.log('Similar Scenes Query Results:', {
+        totalRecords: result.records.length,
+        recordDetails: result.records.map((record, index) => ({
+          index,
+          sceneId: record.get('s').properties.id,
+          similarity: record.get('cosineSimilarity'),
+          hasValidVector: record.get('hasValidVector')
+        }))
+      });
+
+      return result.records.map(record => {
+        const similarityValue = record.get('cosineSimilarity');
+        const sceneProperties = record.get('s').properties;
+
+        // 打印每个场景的向量信息
+        console.log(`Scene ${sceneProperties.id} Vector Details:`, {
+          vectorLength: sceneProperties.vector ? sceneProperties.vector.length : 'No Vector',
+          firstFewValues: sceneProperties.vector ? sceneProperties.vector.slice(0, 5) : 'N/A'
+        });
+
+        return {
+          scene: this.formatNodeProperties(sceneProperties),
+          similarity: typeof similarityValue === 'object' && similarityValue.toNumber 
+            ? similarityValue.toNumber() 
+            : (typeof similarityValue === 'number' 
+              ? similarityValue 
+              : parseFloat(similarityValue))
+        };
+      });
+    } catch (error) {
+      console.error('Error in findSimilarScenes:', error);
+      throw error;
     } finally {
       await session.close();
     }

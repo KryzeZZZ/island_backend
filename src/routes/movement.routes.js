@@ -4,12 +4,40 @@ const nodeService = require('../services/node.service');
 const movementService = require('../services/movement.service');
 const sceneGeneratorService = require('../services/scene-generator.service');
 const objectService = require('../services/object.service');
+const vectorizeService = require('../services/vectorize.service');
+const neo4j = require('neo4j-driver');
 
 // 从错误消息中提取目的地
 function extractDestination(errorMessage) {
-  const match = errorMessage.match(/找不到目的地: (.+)$/);
-  return match ? match[1] : null;
+  // 如果错误消息为 undefined 或 null，返回 null
+  if (!errorMessage) return null;
+
+  // 确保错误消息是字符串
+  const message = String(errorMessage);
+
+  // 尝试匹配不同格式的目的地提取
+  const patterns = [
+    /找不到目的地[:：]?\s*(.+)$/,
+    /目的地是[:：]?\s*(.+)$/,
+    /去(.+)$/
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match) return match[1].trim();
+  }
+
+  return null;
 }
+
+// 创建 Neo4j 驱动实例
+const driver = neo4j.driver(
+  process.env.NEO4J_URI || 'bolt://localhost:7687',
+  neo4j.auth.basic(
+    process.env.NEO4J_USER || 'neo4j', 
+    process.env.NEO4J_PASSWORD || '20071028'
+  )
+);
 
 // 处理移动命令
 router.post('/', async (req, res) => {
@@ -23,52 +51,87 @@ router.post('/', async (req, res) => {
     // 调用移动服务处理文本
     const movementResult = await movementService.processMovement(userId, text);
 
+    // 如果 movementResult 不是对象，将其转换为对象
+    const result = typeof movementResult === 'object' 
+      ? movementResult 
+      : { success: false, error: '移动服务返回了无效的结果' };
+
     // 如果移动成功
-    if (movementResult.success) {
+    if (result.success) {
       // 如果有新场景，查找或创建场景节点
-      if (movementResult.nearby_scenes && movementResult.nearby_scenes.length > 0) {
-        const targetScene = movementResult.nearby_scenes[0];
+      if (result.nearby_scenes && result.nearby_scenes.length > 0) {
+        const targetScene = result.nearby_scenes[0];
         const scene = await nodeService.findOrCreateScene(targetScene.description);
         
         // 更新用户位置
-        const result = await nodeService.updateUserLocation(userId, scene.id);
+        const locationResult = await nodeService.updateUserLocation(userId, scene.id);
         
         return res.json({
           success: true,
-          message: movementResult.message,
-          ...result
+          message: result.message,
+          ...locationResult
         });
       }
-      return res.json(movementResult);
+      return res.json(result);
     }
 
     // 如果是找不到目的地的错误
-    const destination = extractDestination(movementResult.error || movementResult.message);
-    if (destination) {
-      // 生成新场景
-      const sceneDescription = await sceneGeneratorService.generateScene(destination);
+    const destination = extractDestination(result.error || result.message);
+    const searchText = destination || text;
+
+    const session = driver.session();
+    try {
+      const result = await session.run(
+        `MATCH (s:Scene) 
+         WHERE s.description CONTAINS $searchText 
+         RETURN s 
+         LIMIT 1`,
+        { searchText }
+      );
+
+      let scene;
+      let locationResult;
+      if (result.records.length > 0) {
+        // 找到包含关键词的场景
+        scene = nodeService.formatNodeProperties(result.records[0].get('s').properties);
+        
+        // 直接更新用户的 LOCATED_AT 关系
+        locationResult = await nodeService.updateUserLocation(userId, scene.id);
+
+        return res.json({
+          success: true,
+          message: scene.description,  // 直接返回场景描述
+          ...locationResult
+        });
+      } 
       
-      // 创建新场景（不再传入向量）
-      const scene = await nodeService.createScene({
+      // 如果没有找到现有场景，生成新场景
+      const sceneDescription = await sceneGeneratorService.generateScene(searchText);
+      
+      // 向量化场景描述
+      const sceneVector = await vectorizeService.vectorizeDescription(sceneDescription);
+      
+      // 创建新场景
+      scene = await nodeService.createScene({
         description: sceneDescription,
-        polarPosition: { radius: 0, angle: 0 }  // 默认位置，后续可以优化
-      });
+        polarPosition: { radius: 0, angle: 0 },  // 默认位置，后续可以优化
+        vector: sceneVector
+      }).then(result => result.scene);
 
-      // 更新用户位置到新场景
-      const result = await nodeService.updateUserLocation(userId, scene.scene.id);
+      // 更新用户位置到场景
+      locationResult = await nodeService.updateUserLocation(userId, scene.id);
 
-      // 返回完整的场景信息，不包含向量
+      // 返回完整的场景信息
       return res.json({
         success: true,
-        message: `已生成并到达新场景: ${sceneDescription}`,
-        ...result,
-        objects: scene.objects  // 包含扫描到的物体信息
+        message: scene.description,  // 直接返回场景描述
+        ...locationResult
       });
+    } finally {
+      await session.close();
     }
-
-    // 其他错误情况
-    res.status(400).json({ error: movementResult.error || movementResult.message });
   } catch (error) {
+    console.error('总体错误:', error);
     res.status(500).json({ error: error.message });
   }
 });

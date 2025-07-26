@@ -19,6 +19,11 @@ class RelationService {
 
   // 掷骰子判断动作结果
   async rollDiceForAction(userId, action) {
+    console.log('Rolling dice for action:', {
+      userId,
+      action: JSON.stringify(action, null, 2)
+    });
+
     const neo4j = require('neo4j-driver');
     const driver = neo4j.driver(
       process.env.NEO4J_URI || 'bolt://localhost:7687',
@@ -35,7 +40,23 @@ class RelationService {
         'MATCH (u:User {id: $userId}) RETURN u.introduction as persona', 
         { userId }
       );
-      const persona = userResult.records[0].get('persona');
+      
+      // Add default persona if not found
+      const persona = userResult.records.length > 0 
+        ? userResult.records[0].get('persona') 
+        : '普通角色，没有特殊背景描述';
+
+      // Validate target_relation
+      if (!action.target_relation) {
+        throw new Error('Missing target_relation');
+      }
+
+      // Ensure target_relation has all properties, even if empty
+      action.target_relation = {
+        subject: action.target_relation.subject || '',
+        predicate: action.target_relation.predicate || '',
+        object: action.target_relation.object || ''
+      };
 
       // 获取当前场景的深度为1的对象和关系
       const objectsResult = await session.run(

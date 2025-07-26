@@ -3,7 +3,7 @@ const router = express.Router();
 const actionService = require('../services/action.service');
 
 // 执行自我行动
-router.post('/self', async (req, res) => {
+router.post('/self-action', async (req, res) => {
   try {
     const { userId, action } = req.body;
 

@@ -160,7 +160,7 @@ app.use("/api/actions/movement", movementRoutes);
 app.use("/api/accounts", accountRoutes);
 app.use("/api/actions", actionRoutes);
 app.use("/api/actions", relationRoutes);
-
+app.use("/api/graph", graphRoutes);
 // Basic route
 app.get("/", (req, res) => {
   res.json({ message: "Welcome to Express Neo4j API" });
@@ -184,7 +184,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-const PORT = process.env.PORT || 5432;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });

@@ -1,15 +1,16 @@
-const express = require('express');
-const cors = require('cors');
-const morgan = require('morgan');
-const neo4j = require('neo4j-driver');
-require('dotenv').config();
+const express = require("express");
+const cors = require("cors");
+const morgan = require("morgan");
+const neo4j = require("neo4j-driver");
+require("dotenv").config();
 
-const nodeRoutes = require('./routes/node.routes');
-const motiveRoutes = require('./routes/motive.routes');
-const movementRoutes = require('./routes/movement.routes');
-const accountRoutes = require('./routes/account.routes');
-const actionRoutes = require('./routes/action.routes');
-const relationRoutes = require('./routes/relation.routes');
+const nodeRoutes = require("./routes/node.routes");
+const motiveRoutes = require("./routes/motive.routes");
+const movementRoutes = require("./routes/movement.routes");
+const accountRoutes = require("./routes/account.routes");
+const actionRoutes = require("./routes/action.routes");
+const relationRoutes = require("./routes/relation.routes");
+const graphRoutes = require("./routes/graph.routes");
 
 const app = express();
 
@@ -130,10 +131,10 @@ app.use(morgan('dev'));
 
 // Neo4j Connection
 const driver = neo4j.driver(
-  process.env.NEO4J_URI || 'bolt://localhost:7687',
+  process.env.NEO4J_URI || "bolt://localhost:7687",
   neo4j.auth.basic(
-    process.env.NEO4J_USER || 'neo4j',
-    process.env.NEO4J_PASSWORD || '20071028'
+    process.env.NEO4J_USER || "neo4j",
+    process.env.NEO4J_PASSWORD || "20071028"
   )
 );
 
@@ -141,10 +142,10 @@ const driver = neo4j.driver(
 const testConnection = async () => {
   const session = driver.session();
   try {
-    await session.run('RETURN 1');
-    console.log('Successfully connected to Neo4j database');
+    await session.run("RETURN 1");
+    console.log("Successfully connected to Neo4j database");
   } catch (error) {
-    console.error('Neo4j connection error:', error);
+    console.error("Neo4j connection error:", error);
   } finally {
     await session.close();
   }
@@ -153,19 +154,37 @@ const testConnection = async () => {
 testConnection();
 
 // Routes
-app.use('/api', nodeRoutes);
-app.use('/api/motives', motiveRoutes);
-app.use('/api/actions/movement', movementRoutes);
-app.use('/api/accounts', accountRoutes);
-app.use('/api/actions', actionRoutes);
-app.use('/api/actions', relationRoutes);
+app.use("/api", nodeRoutes);
+app.use("/api/motives", motiveRoutes);
+app.use("/api/actions/movement", movementRoutes);
+app.use("/api/accounts", accountRoutes);
+app.use("/api/actions", actionRoutes);
+app.use("/api/actions", relationRoutes);
 
 // Basic route
-app.get('/', (req, res) => {
-  res.json({ message: 'Welcome to Express Neo4j API' });
+app.get("/", (req, res) => {
+  res.json({ message: "Welcome to Express Neo4j API" });
 });
 
-const PORT = process.env.PORT || 3000;
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error("Unhandled Error:", err);
+
+  if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
+    return res.status(400).json({
+      error: "Invalid JSON payload",
+      details: err.message,
+      payload: req.body,
+    });
+  }
+
+  res.status(500).json({
+    error: "Something went wrong!",
+    details: err.message,
+  });
+});
+
+const PORT = process.env.PORT || 5432;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-}); 
+});

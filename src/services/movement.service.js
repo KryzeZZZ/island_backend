@@ -5,11 +5,11 @@ class MovementService {
     this.movementUrl = 'http://localhost:8000/movement';
   }
 
-  async processMovement(userId, command) {
+  async processMovement(userId, text) {
     try {
       const response = await axios.post(this.movementUrl, {
         user_id: userId,
-        command: command
+        text: text
       });
 
       console.log('Movement Response:', JSON.stringify(response.data, null, 2));

@@ -8,6 +8,8 @@ const nodeRoutes = require('./routes/node.routes');
 const motiveRoutes = require('./routes/motive.routes');
 const movementRoutes = require('./routes/movement.routes');
 const accountRoutes = require('./routes/account.routes');
+const actionRoutes = require('./routes/action.routes');
+const relationRoutes = require('./routes/relation.routes');
 
 const app = express();
 
@@ -45,6 +47,8 @@ app.use('/api', nodeRoutes);
 app.use('/api/motives', motiveRoutes);
 app.use('/api/movement', movementRoutes);
 app.use('/api/accounts', accountRoutes);
+app.use('/api/actions', actionRoutes);
+app.use('/api/relations', relationRoutes);
 
 // Basic route
 app.get('/', (req, res) => {
